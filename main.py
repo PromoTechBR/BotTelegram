@@ -1,140 +1,89 @@
 import os
 import time
 import json
-import textwrap
+import re
 from pathlib import Path
+from typing import List
 
 import requests
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
-# Carrega .env localmente (ignorando erro se não existir; no Render usaremos env vars)
 load_dotenv()
 
 app = FastAPI()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@PromoTechBrasil")
-ML_SITE_ID = os.getenv("ML_SITE_ID", "MLB")
-ML_AFFILIATE_TAG = os.getenv("ML_AFFILIATE_TAG", "promotechbr")
-
-DEFAULT_KEYWORDS = [
-    "smartphone",
-    "notebook",
-    "pc gamer",
-    "fone bluetooth",
-    "caixa de som",
-    "computador",
-    "hardware",
-    "gadgets",
-    "casa inteligente",
-]
-
-KEYWORDS = [
-    k.strip() for k in os.getenv("KEYWORDS", "").split(",") if k.strip()
-] or DEFAULT_KEYWORDS
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "changeme")
+ALLOWED_TELEGRAM_USER_ID = os.getenv("ALLOWED_TELEGRAM_USER_ID")  # opcional
 
 OFFERS_PER_RUN = int(os.getenv("OFFERS_PER_RUN", "10"))
-MIN_DISCOUNT_PERCENT = float(os.getenv("MIN_DISCOUNT_PERCENT", "15"))
-SENT_IDS_FILE = Path(os.getenv("SENT_IDS_FILE", "sent_offers.json"))
+LINKS_QUEUE_FILE = Path(os.getenv("LINKS_QUEUE_FILE", "links_queue.json"))
 
 
-def load_sent_ids():
-    if SENT_IDS_FILE.exists():
+class TelegramUpdate(BaseModel):
+    update_id: int | None = None
+    message: dict | None = None
+    edited_message: dict | None = None
+    # ignoramos o resto
+
+
+def load_links_queue() -> List[str]:
+    if LINKS_QUEUE_FILE.exists():
         try:
-            with SENT_IDS_FILE.open("r", encoding="utf-8") as f:
+            with LINKS_QUEUE_FILE.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-                return set(data.get("ids", []))
+                return data.get("links", [])
         except Exception:
-            return set()
-    return set()
+            return []
+    return []
 
 
-def save_sent_ids(sent_ids):
+def save_links_queue(links: List[str]):
     try:
-        with SENT_IDS_FILE.open("w", encoding="utf-8") as f:
-            json.dump({"ids": list(sent_ids)}, f)
+        with LINKS_QUEUE_FILE.open("w", encoding="utf-8") as f:
+            json.dump({"links": links}, f)
     except Exception:
         pass
 
 
-ML_ACCESS_TOKEN = os.getenv("ML_ACCESS_TOKEN")
-
-def fetch_offers_for_keyword(keyword, limit=50):
-    if not ML_ACCESS_TOKEN:
-        raise RuntimeError("ML_ACCESS_TOKEN não definido nas variáveis de ambiente")
-    url = f"https://api.mercadolibre.com/sites/{ML_SITE_ID}/search"
-    params = {"q": keyword, "limit": limit, "offset": 0, "condition": "new"}
-    headers = {"Authorization": f"Bearer {ML_ACCESS_TOKEN}", "Accept": "application/json"}
-    resp = requests.get(url, params=params, headers=headers, timeout=15)
-    resp.raise_for_status()
-    return resp.json().get("results", [])
-
-def build_affiliate_link(permalink: str) -> str:
-    """
-    ATENÇÃO: adapte para o formato EXATO do seu programa de afiliados.
-    Aqui é só um exemplo usando aff_tag=promotechbr.
-    """
-    if "?" in permalink:
-        return f"{permalink}&aff_tag={ML_AFFILIATE_TAG}"
-    return f"{permalink}?aff_tag={ML_AFFILIATE_TAG}"
+def extract_ml_links(text: str) -> List[str]:
+    if not text:
+        return []
+    urls = re.findall(r"https?://\S+", text)
+    result = []
+    for url in urls:
+        clean = url.strip(" ,;)")
+        if "mercadolivre.com" in clean or "mercadolibre.com" in clean:
+            result.append(clean)
+    return result
 
 
-def compute_discount(item):
-    price = item.get("price")
-    original_price = item.get("original_price")
-    if original_price and original_price > price:
-        return round((original_price - price) / original_price * 100, 2)
-    return 0.0
+def enqueue_links(new_links: List[str]) -> int:
+    if not new_links:
+        return 0
+    queue = load_links_queue()
+    existing = set(queue)
+    added = 0
+    for link in new_links:
+        if link not in existing:
+            queue.append(link)
+            existing.add(link)
+            added += 1
+    save_links_queue(queue)
+    return added
 
 
-def collect_best_offers():
-    all_items = {}
-    for kw in KEYWORDS:
-        try:
-            results = fetch_offers_for_keyword(kw)
-        except Exception as e:
-            print(f"[ERRO] Falha ao buscar '{kw}': {e}")
-            continue
-
-        for item in results:
-            item_id = item.get("id")
-            if not item_id:
-                continue
-            if item_id in all_items:
-                continue
-
-            discount = compute_discount(item)
-            sold_quantity = item.get("sold_quantity") or 0
-
-            all_items[item_id] = {
-                "id": item_id,
-                "title": item.get("title", "")[:120],
-                "price": item.get("price"),
-                "original_price": item.get("original_price"),
-                "discount": discount,
-                "sold_quantity": sold_quantity,
-                "permalink": item.get("permalink"),
-                "thumbnail": item.get("thumbnail"),
-            }
-
-    filtered = [
-        it for it in all_items.values()
-        if it["discount"] >= MIN_DISCOUNT_PERCENT
-    ]
-
-    filtered.sort(key=lambda x: (x["discount"], x["sold_quantity"]), reverse=True)
-    return filtered
-
-
-def send_telegram_message(text: str):
+def send_telegram_message(text: str, chat_id: str | int):
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("TELEGRAM_BOT_TOKEN não definido")
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
-        "chat_id": TELEGRAM_CHANNEL_ID,
+        "chat_id": chat_id,
         "text": text,
         "disable_web_page_preview": False,
         "parse_mode": "HTML",
@@ -145,73 +94,74 @@ def send_telegram_message(text: str):
     return resp
 
 
-def build_message(item):
-    price = item["price"]
-    original_price = item["original_price"]
-    discount = item["discount"]
-    sold = item["sold_quantity"]
-    link = build_affiliate_link(item["permalink"])
-
-    preco_str = f"R$ {price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    if original_price:
-        orig_str = f"R$ {original_price:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        preco_line = f"<b>Preço:</b> {preco_str} (de {orig_str}, {discount:.0f}% OFF)"
-    else:
-        preco_line = f"<b>Preço:</b> {preco_str}"
-
-    sold_line = f"<b>Vendas:</b> {sold}" if sold else ""
-
-    text = textwrap.dedent(f"""
-        🔥 <b>{item["title"]}</b>
-
-        {preco_line}
-        {sold_line}
-
-        👉 <a href="{link}">Ver oferta no Mercado Livre</a>
-    """).strip()
-
-    return text
-
-
 def run_once_logic():
-    print("[INFO] Buscando melhores ofertas...")
-    sent_ids = load_sent_ids()
-    offers = collect_best_offers()
+    print("[INFO] Consumindo fila de links...")
+    queue = load_links_queue()
+    if not queue:
+        print("[INFO] Fila vazia, nenhuma oferta para enviar.")
+        return {"sent": 0, "message": "Fila vazia."}
 
-    new_offers = [o for o in offers if o["id"] not in sent_ids]
-
-    if not new_offers:
-        print("[INFO] Nenhuma nova oferta nova encontrada.")
-        return {"sent": 0, "message": "Nenhuma nova oferta encontrada."}
-
-    to_send = new_offers[:OFFERS_PER_RUN]
-    print(f"[INFO] Enviando {len(to_send)} ofertas para o canal {TELEGRAM_CHANNEL_ID}...")
+    to_send = queue[:OFFERS_PER_RUN]
+    remaining = queue[OFFERS_PER_RUN:]
 
     sent_count = 0
-    titles = []
-
-    for idx, item in enumerate(to_send, start=1):
-        msg = build_message(item)
-        send_telegram_message(msg)
-        print(f"[OK] Oferta {idx} enviada: {item['title']}")
-        titles.append(item["title"])
-        sent_ids.add(item["id"])
+    for idx, link in enumerate(to_send, start=1):
+        text = f"🔥 Oferta #{idx}:\n{link}"
+        send_telegram_message(text, TELEGRAM_CHANNEL_ID)
+        print(f"[OK] Link enviado: {link}")
         sent_count += 1
-        time.sleep(2)  # pequeno intervalo para evitar flood
+        time.sleep(2)
 
-    save_sent_ids(sent_ids)
-    print("[INFO] Execução finalizada.")
-
-    return {
-        "sent": sent_count,
-        "titles": titles,
-        "channel": TELEGRAM_CHANNEL_ID,
-    }
+    save_links_queue(remaining)
+    print(f"[INFO] Execução finalizada. Enviados {sent_count} links.")
+    return {"sent": sent_count, "remaining": len(remaining)}
 
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/telegram/webhook/{secret}")
+def telegram_webhook(secret: str, update: TelegramUpdate):
+    if secret != TELEGRAM_WEBHOOK_SECRET:
+        raise HTTPException(status_code=403, detail="Invalid secret")
+
+    msg = update.message or update.edited_message
+    if not msg:
+        return {"ok": True}
+
+    from_user = msg.get("from", {})
+    user_id = from_user.get("id")
+    chat_id = msg["chat"]["id"]
+    text = msg.get("text") or msg.get("caption") or ""
+
+    if ALLOWED_TELEGRAM_USER_ID and str(user_id) != str(ALLOWED_TELEGRAM_USER_ID):
+        print(f"[INFO] Ignorando mensagem de user_id {user_id}")
+        return {"ok": True}
+
+    links = extract_ml_links(text)
+    if not links:
+        # tenta achar links em entidades
+        entities = msg.get("entities") or msg.get("caption_entities") or []
+        for e in entities:
+            if e.get("type") == "text_link" and e.get("url"):
+                links.append(e["url"])
+
+    added = enqueue_links(links)
+
+    if added > 0:
+        send_telegram_message(
+            f"✅ Recebi {added} link(s). Eles serão enviados gradualmente para o canal.",
+            chat_id,
+        )
+    else:
+        send_telegram_message(
+            "Não encontrei nenhum link do Mercado Livre na mensagem (ou já estavam na fila).",
+            chat_id,
+        )
+
+    return {"ok": True, "added": added}
 
 
 @app.post("/run-offers")
@@ -221,11 +171,4 @@ def run_offers():
         return JSONResponse(content={"ok": True, "result": result})
     except Exception as e:
         print(f"[ERRO] Execução /run-offers: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"ok": False, "error": str(e)},
-        )
-
-
-
-
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
