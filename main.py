@@ -67,7 +67,16 @@ def fetch_offers_for_keyword(keyword, limit=50):
         "offset": 0,
         "condition": "new",
     }
-    resp = requests.get(url, params=params, timeout=15)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/131.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://www.mercadolivre.com.br/",
+    }
+    resp = requests.get(url, params=params, headers=headers, timeout=15)
+    if resp.status_code == 403:
+        print(f"[ERRO] 403 Forbidden para '{keyword}' – resposta curta: {resp.text[:200]}")
+        return []
     resp.raise_for_status()
     data = resp.json()
     return data.get("results", [])
@@ -227,3 +236,4 @@ def run_offers():
             status_code=500,
             content={"ok": False, "error": str(e)},
         )
+
