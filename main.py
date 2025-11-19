@@ -59,28 +59,17 @@ def save_sent_ids(sent_ids):
         pass
 
 
-def fetch_offers_for_keyword(keyword, limit=50):
-    url = f"https://api.mercadolibre.com/sites/{ML_SITE_ID}/search"
-    params = {
-        "q": keyword,
-        "limit": limit,
-        "offset": 0,
-        "condition": "new",
-    }
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/131.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://www.mercadolivre.com.br/",
-    }
-    resp = requests.get(url, params=params, headers=headers, timeout=15)
-    if resp.status_code == 403:
-        print(f"[ERRO] 403 Forbidden para '{keyword}' – resposta curta: {resp.text[:200]}")
-        return []
-    resp.raise_for_status()
-    data = resp.json()
-    return data.get("results", [])
+ML_ACCESS_TOKEN = os.getenv("ML_ACCESS_TOKEN")
 
+def fetch_offers_for_keyword(keyword, limit=50):
+    if not ML_ACCESS_TOKEN:
+        raise RuntimeError("ML_ACCESS_TOKEN não definido nas variáveis de ambiente")
+    url = f"https://api.mercadolibre.com/sites/{ML_SITE_ID}/search"
+    params = {"q": keyword, "limit": limit, "offset": 0, "condition": "new"}
+    headers = {"Authorization": f"Bearer {ML_ACCESS_TOKEN}", "Accept": "application/json"}
+    resp = requests.get(url, params=params, headers=headers, timeout=15)
+    resp.raise_for_status()
+    return resp.json().get("results", [])
 
 def build_affiliate_link(permalink: str) -> str:
     """
@@ -236,4 +225,5 @@ def run_offers():
             status_code=500,
             content={"ok": False, "error": str(e)},
         )
+
 
