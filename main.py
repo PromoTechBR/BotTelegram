@@ -64,7 +64,7 @@ ML_ACCESS_TOKEN = os.getenv("ML_ACCESS_TOKEN")
 def fetch_offers_for_keyword(keyword, limit=50):
     if not ML_ACCESS_TOKEN:
         raise RuntimeError("ML_ACCESS_TOKEN não definido nas variáveis de ambiente")
-    url = f"https://api.mercadolivre.com/sites/{ML_SITE_ID}/search"
+    url = f"https://api.mercadolibre.com/sites/{ML_SITE_ID}/search"
     params = {"q": keyword, "limit": limit, "offset": 0, "condition": "new"}
     headers = {"Authorization": f"Bearer {ML_ACCESS_TOKEN}", "Accept": "application/json"}
     resp = requests.get(url, params=params, headers=headers, timeout=15)
@@ -225,6 +225,7 @@ def run_offers():
             status_code=500,
             content={"ok": False, "error": str(e)},
         )
+
 
 
 
