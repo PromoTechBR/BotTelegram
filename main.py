@@ -22,7 +22,9 @@ ALLOWED_TELEGRAM_USER_ID = os.getenv("ALLOWED_TELEGRAM_USER_ID")  # opcional
 
 OFFERS_PER_RUN = int(os.getenv("OFFERS_PER_RUN", "10"))
 LINKS_QUEUE_FILE = Path(os.getenv("LINKS_QUEUE_FILE", "links_queue.json"))
+# no topo do arquivo já temos: import re
 
+AMZ_ASSOC_TAG = os.getenv("AMZ_ASSOC_TAG")
 
 class TelegramUpdate(BaseModel):
     update_id: int | None = None
@@ -49,29 +51,6 @@ def save_links_queue(links: List[str]):
     except Exception:
         pass
 
-def jukeraKRL(text: str) -> List[str]:
-    if not text:
-        return []
-    urls = re.findall(r"https?://\S+", text)
-    result = []
-    for url in urls:
-        clean = url.strip(" ,;)")
-        match clean:
-            case "mercadolivre.com":
-                result.append(clean)
-            case "mercadolibre.com":
-                result.append(clean)
-            case "amazon.com.br":
-                result.append(clean)
-            case "amzn.to":
-                result.append(clean)
-            case "shopee.com.br":
-                result.append(clean)
-            case "shopee.com":
-                result.append(clean)
-    return result
-
-
 def enqueue_links(new_links: List[str]) -> int:
     if not new_links:
         return 0
@@ -86,6 +65,34 @@ def enqueue_links(new_links: List[str]) -> int:
     save_links_queue(queue)
     return added
 
+def normalize_affiliate_link(url: str) -> str:
+    clean = url.strip(" ,;)")
+    # AMAZON
+    if "amazon.com.br" in clean or "amzn.to" in clean:
+        if AMZ_ASSOC_TAG and "tag=" not in clean:
+            sep = "&" if "?" in clean else "?"
+            clean = f"{clean}{sep}tag={AMZ_ASSOC_TAG}"
+    return clean
+
+def extract_affiliate_links(text: str) -> list[str]:
+    if not text:
+        return []
+    urls = re.findall(r"https?://\S+", text)
+    result = []
+    for url in urls:
+        clean = url.strip(" ,;)")
+        if any(
+                d in clean
+                for d in [
+                    "mercadolivre.com",
+                    "amazon.com.br",
+                    "amzn.to",
+                    "shopee.com.br",
+                    "shopee.com",
+                ]
+        ):
+            result.append(normalize_affiliate_link(clean))
+    return result
 
 def send_telegram_message(text: str, chat_id: str | int):
     if not TELEGRAM_BOT_TOKEN:
@@ -150,7 +157,7 @@ def telegram_webhook(secret: str, update: TelegramUpdate):
         print(f"[INFO] Ignorando mensagem de user_id {user_id}")
         return {"ok": True}
 
-    links = jukeraKRL(text)
+    links = extract_affiliate_links(text)
     if not links:
         # tenta achar links em entidades
         entities = msg.get("entities") or msg.get("caption_entities") or []
