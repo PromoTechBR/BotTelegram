@@ -49,16 +49,26 @@ def save_links_queue(links: List[str]):
     except Exception:
         pass
 
-
-def extract_ml_links(text: str) -> List[str]:
+def jukeraKRL(text: str) -> List[str]:
     if not text:
         return []
     urls = re.findall(r"https?://\S+", text)
     result = []
     for url in urls:
         clean = url.strip(" ,;)")
-        if "mercadolivre.com" in clean or "mercadolibre.com" in clean:
-            result.append(clean)
+        match clean:
+            case "mercadolivre.com":
+                result.append(clean)
+            case "mercadolibre.com":
+                result.append(clean)
+            case "amazon.com.br":
+                result.append(clean)
+            case "amzn.to":
+                result.append(clean)
+            case "shopee.com.br":
+                result.append(clean)
+            case "shopee.com":
+                result.append(clean)
     return result
 
 
@@ -140,7 +150,7 @@ def telegram_webhook(secret: str, update: TelegramUpdate):
         print(f"[INFO] Ignorando mensagem de user_id {user_id}")
         return {"ok": True}
 
-    links = extract_ml_links(text)
+    links = jukeraKRL(text)
     if not links:
         # tenta achar links em entidades
         entities = msg.get("entities") or msg.get("caption_entities") or []
