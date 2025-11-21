@@ -57,17 +57,11 @@ def jukeraKRL(text: str) -> List[str]:
     for url in urls:
         clean = url.strip(" ,;)")
         match clean:
-            case "mercadolivre.com":
+            case "mercadolivre.com" | "mercadolibre.com":
                 result.append(clean)
-            case "mercadolibre.com":
+            case "amazon.com.br" | "amzn.to":
                 result.append(clean)
-            case "amazon.com.br":
-                result.append(clean)
-            case "amzn.to":
-                result.append(clean)
-            case "shopee.com.br":
-                result.append(clean)
-            case "shopee.com":
+            case "shopee.com.br" | "shopee.com":
                 result.append(clean)
     return result
 
