@@ -172,6 +172,7 @@ def telegram_webhook(secret: str, update: TelegramUpdate):
             f"✅ Recebi {added} link(s). Eles serão enviados gradualmente para o canal.",
             chat_id,
         )
+        run_offers()
     else:
         send_telegram_message(
             "Não encontrei nenhum link do Mercado Livre na mensagem (ou já estavam na fila).",
@@ -189,3 +190,4 @@ def run_offers():
     except Exception as e:
         print(f"[ERRO] Execução /run-offers: {e}")
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
