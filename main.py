@@ -24,9 +24,7 @@ OFFERS_PER_RUN = int(os.getenv("OFFERS_PER_RUN", "10"))
 LINKS_QUEUE_FILE = Path(os.getenv("LINKS_QUEUE_FILE", "links_queue.json"))
 # no topo do arquivo já temos: import re
 
-AMZ_ASSOC_TAG = os.getenv("AMZ_ASSOC_TAG")  # ex: promotechbr-20
-SHOPEE_TAG_PARAM = os.getenv("SHOPEE_TAG_PARAM")  # ex: af_sub1  (vamos definir depois)
-SHOPEE_TAG_VALUE = os.getenv("SHOPEE_TAG_VALUE")  # ex: promotechbr
+AMZ_ASSOC_TAG = os.getenv("AMZ_ASSOC_TAG")
 
 class TelegramUpdate(BaseModel):
     update_id: int | None = None
@@ -74,11 +72,6 @@ def normalize_affiliate_link(url: str) -> str:
         if AMZ_ASSOC_TAG and "tag=" not in clean:
             sep = "&" if "?" in clean else "?"
             clean = f"{clean}{sep}tag={AMZ_ASSOC_TAG}"
-    # SHOPEE (só acrescenta parâmetro se você quiser)
-    if "shopee.com" in clean:
-        if SHOPEE_TAG_PARAM and SHOPEE_TAG_VALUE and f"{SHOPEE_TAG_PARAM}=" not in clean:
-            sep = "&" if "?" in clean else "?"
-            clean = f"{clean}{sep}{SHOPEE_TAG_PARAM}={SHOPEE_TAG_VALUE}"
     return clean
 
 def extract_affiliate_links(text: str) -> list[str]:
