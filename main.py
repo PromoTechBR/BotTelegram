@@ -167,7 +167,7 @@ def telegram_webhook(secret: str, update: TelegramUpdate):
 
     added = enqueue_links(links)
 
-    if added > 0:
+    if added > 4:
         send_telegram_message(
             f"✅ Recebi {added} link(s). Eles serão enviados gradualmente para o canal.",
             chat_id,
@@ -190,4 +190,5 @@ def run_offers():
     except Exception as e:
         print(f"[ERRO] Execução /run-offers: {e}")
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
+
 
